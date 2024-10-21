@@ -103,6 +103,10 @@ struct paddle {
     unsigned short x, y, width, height;
     unsigned char color;
 };
+struct ball {
+    int x, y, size, dx, dy;
+    unsigned char color;
+};
 
 /* put a pixel on the screen in mode 4 */
 void put_pixel(volatile unsigned short* buffer, int row, int col, unsigned char color) {
@@ -136,10 +140,17 @@ void draw_square(volatile unsigned short* buffer, struct square* s) {
 }
 
 /* clear the screen right around the square */
-void update_screen(volatile unsigned short* buffer, unsigned short color, struct paddle* p, unsigned char net_color) {
+void update_screen(volatile unsigned short* buffer, unsigned short color, struct paddle* p,struct paddle* ai_paddle, unsigned char net_color) {
    short row, col;
     for (row = p->y - 3; row < (p->y + p->height + 3); row++) {
         for (col = p->x - 3; col < (p->x + p->width + 3); col++) {
+            put_pixel(buffer, row, col, color);
+        }
+    }
+
+     /* Clear the area around the AI paddle */
+    for (row = ai_paddle->y - 3; row < (ai_paddle->y + ai_paddle->height + 3); row++) {
+        for (col = ai_paddle->x - 3; col < (ai_paddle->x + ai_paddle->width + 3); col++) {
             put_pixel(buffer, row, col, color);
         }
     }
@@ -187,8 +198,7 @@ void clear_screen(volatile unsigned short* buffer, unsigned short color) {
 }
 
 
-//start of my code
-
+//start of the new methods
 
 void draw_paddle(volatile unsigned short* buffer, struct paddle* p) {
     short row, col;
@@ -202,7 +212,58 @@ void draw_paddle(volatile unsigned short* buffer, struct paddle* p) {
     }
 }
 
+void update_ai_paddle(struct paddle* ai_paddle) {
+    static int ai_direction = 1; // 1 for moving down, -1 for moving up
 
+    /* Move the AI paddle */
+    ai_paddle->y += ai_direction;
+
+    /* Reverse direction if it hits the top or bottom */
+    if (ai_paddle->y <= 0) {
+        ai_direction = 1; // Move down
+    } else if (ai_paddle->y + ai_paddle->height >= HEIGHT) {
+        ai_direction = -1; // Move up
+    }
+}
+
+void draw_ball(volatile unsigned short* buffer, struct ball* b) {
+    for (int row = 0; row < b->size; row++) {
+        for (int col = 0; col < b->size; col++) {
+            if (row * row + col * col <= (b->size / 2) * (b->size / 2)) { // Draw a circle
+                put_pixel(buffer, b->y + row, b->x + col, b->color);
+                put_pixel(buffer, b->y + row, b->x - col, b->color);
+                put_pixel(buffer, b->y - row, b->x + col, b->color);
+                put_pixel(buffer, b->y - row, b->x - col, b->color);
+            }
+        }
+    }
+}
+
+void update_ball(struct ball* b, struct paddle* player, struct paddle* ai_paddle) {
+    // Update position
+    b->x += b->dx;
+    b->y += b->dy;
+
+    // Check collision with top and bottom
+    if (b->y <= 0 || b->y + b->size >= HEIGHT) {
+        b->dy = -b->dy; // Reverse direction on collision with top/bottom
+    }
+
+    // Check collision with paddles
+    // Player paddle collision
+    if (b->x <= player->x + player->width && 
+        b->y + b->size >= player->y && 
+        b->y <= player->y + player->height) {
+        b->dx = -b->dx; // Reverse direction on collision with player paddle
+    }
+
+    // AI paddle collision
+    if (b->x + b->size >= ai_paddle->x && 
+        b->y + b->size >= ai_paddle->y && 
+        b->y <= ai_paddle->y + ai_paddle->height) {
+        b->dx = -b->dx; // Reverse direction on collision with AI paddle
+    }
+}
 
 /* the main function */
 int main() {
@@ -231,7 +292,7 @@ int main() {
     /* loop forever */
     while (1) {
         /* clear the screen - only the areas around the paddle */
-        update_screen(buffer, black, (struct paddle*) &player, net_color);  // Cast to use update_screen for now
+        update_screen(buffer, black, (struct paddle*) &player,(struct paddle*) &ai_paddle, net_color);  // Cast to use update_screen for now
 
         /* draw the paddle */
         draw_paddle(buffer, &player);
@@ -241,6 +302,9 @@ int main() {
 
         /* handle button input */
         handle_buttons((struct paddle*) &player);  // Cast if using same button handling function
+
+        //call method to update the AI paddle
+        update_ai_paddle(&ai_paddle);
 
         /* wait for vblank before switching buffers */
         wait_vblank();
