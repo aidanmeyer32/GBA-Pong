@@ -99,6 +99,10 @@ struct square {
     unsigned short x, y, size;
     unsigned char color;
 };
+struct paddle {
+    unsigned short x, y, width, height;
+    unsigned char color;
+};
 
 /* put a pixel on the screen in mode 4 */
 void put_pixel(volatile unsigned short* buffer, int row, int col, unsigned char color) {
@@ -132,12 +136,17 @@ void draw_square(volatile unsigned short* buffer, struct square* s) {
 }
 
 /* clear the screen right around the square */
-void update_screen(volatile unsigned short* buffer, unsigned short color, struct square* s) {
-    short row, col;
-    for (row = s->y - 3; row < (s->y + s->size + 3); row++) {
-        for (col = s->x - 3; col < (s->x + s->size + 3); col++) {
+void update_screen(volatile unsigned short* buffer, unsigned short color, struct paddle* p, unsigned char net_color) {
+   short row, col;
+    for (row = p->y - 3; row < (p->y + p->height + 3); row++) {
+        for (col = p->x - 3; col < (p->x + p->width + 3); col++) {
             put_pixel(buffer, row, col, color);
         }
+    }
+
+    for (row = 0; row < HEIGHT; row += 4) {
+        /* Draw every alternate row to create a dashed line effect */
+        put_pixel(buffer, row, WIDTH / 2, net_color);
     }
 }
 
@@ -156,19 +165,13 @@ volatile unsigned short* flip_buffers(volatile unsigned short* buffer) {
 }
 
 /* handle the buttons which are pressed down */
-void handle_buttons(struct square* s) {
-    /* move the square with the arrow keys */
-    if (button_pressed(BUTTON_DOWN)) {
-        s->y += 1;
+void handle_buttons(struct paddle* p) {
+      /* move the paddle with the arrow keys */
+    if (button_pressed(BUTTON_DOWN) && (p->y + p->height < HEIGHT)) {
+        p->y += 1;
     }
-    if (button_pressed(BUTTON_UP)) {
-        s->y -= 1;
-    }
-    if (button_pressed(BUTTON_RIGHT)) {
-        s->x += 1;
-    }
-    if (button_pressed(BUTTON_LEFT)) {
-        s->x -= 1;
+    if (button_pressed(BUTTON_UP) && p->y > 0) {
+        p->y -= 1;
     }
 }
 
@@ -183,16 +186,40 @@ void clear_screen(volatile unsigned short* buffer, unsigned short color) {
     }
 }
 
+
+//start of my code
+
+
+void draw_paddle(volatile unsigned short* buffer, struct paddle* p) {
+    short row, col;
+    /* for each row of the paddle */
+    for (row = p->y; row < (p->y + p->height); row++) {
+        /* loop through each column of the paddle */
+        for (col = p->x; col < (p->x + p->width); col++) {
+            /* set the screen location to this color */
+            put_pixel(buffer, row, col, p->color);
+        }
+    }
+}
+
+
+
 /* the main function */
 int main() {
     /* we set the mode to mode 4 with bg2 on */
     *display_control = MODE4 | BG2;
 
-    /* make a green square */
-    struct square s = {10, 10, 15, add_color(0, 20, 2)};
+    //create gray paddle
+    struct paddle player = {20,60,5,25, add_color(15,15,15)};
+
+    //create the ai paddle
+    struct paddle ai_paddle = {WIDTH - 15, 10, 5, 30, add_color(15, 15, 15)};
 
     /* add black to the palette */
     unsigned char black = add_color(0, 0, 0);
+
+    //create the net color
+    unsigned char net_color = add_color(15,15,15);
 
     /* the buffer we start with */
     volatile unsigned short* buffer = front_buffer;
@@ -203,19 +230,23 @@ int main() {
 
     /* loop forever */
     while (1) {
-        /* clear the screen - only the areas around the square! */
-        update_screen(buffer, black, &s);
+        /* clear the screen - only the areas around the paddle */
+        update_screen(buffer, black, (struct paddle*) &player, net_color);  // Cast to use update_screen for now
 
-        /* draw the square */
-        draw_square(buffer, &s);
+        /* draw the paddle */
+        draw_paddle(buffer, &player);
+
+        //draw ai paddle
+        draw_paddle(buffer, &ai_paddle);
 
         /* handle button input */
-        handle_buttons(&s);
+        handle_buttons((struct paddle*) &player);  // Cast if using same button handling function
 
-        /* wiat for vblank before switching buffers */
+        /* wait for vblank before switching buffers */
         wait_vblank();
 
         /* swap the buffers */
         buffer = flip_buffers(buffer);
     }
 }
+
