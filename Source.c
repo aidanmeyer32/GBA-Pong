@@ -53,6 +53,10 @@ volatile unsigned short* buttons = (volatile unsigned short*) 0x04000130;
  * much of the screen has been drawn */
 volatile unsigned short* scanline_counter = (volatile unsigned short*) 0x4000006;
 
+//add scoring variables
+int player_score = 0;
+int ai_score = 0;
+
 /* wait for the screen to be fully drawn so we can do something during vblank */
 void wait_vblank() {
     /* wait until all 160 lines have been updated */
@@ -140,28 +144,45 @@ void draw_square(volatile unsigned short* buffer, struct square* s) {
 }
 
 /* clear the screen right around the square */
-void update_screen(volatile unsigned short* buffer, unsigned short color, struct paddle* p,struct paddle* ai_paddle, unsigned char net_color) {
-   short row, col;
+/* this function takes a video buffer and returns to you the other one */
+void update_screen(volatile unsigned short* buffer, unsigned short color, struct paddle* p, struct paddle* ai_paddle, unsigned char net_color, struct ball* b) {
+    short row, col;
+    
+    // Clear the area around the player paddle
     for (row = p->y - 3; row < (p->y + p->height + 3); row++) {
         for (col = p->x - 3; col < (p->x + p->width + 3); col++) {
             put_pixel(buffer, row, col, color);
         }
     }
 
-     /* Clear the area around the AI paddle */
+    // Clear the area around the AI paddle
     for (row = ai_paddle->y - 3; row < (ai_paddle->y + ai_paddle->height + 3); row++) {
         for (col = ai_paddle->x - 3; col < (ai_paddle->x + ai_paddle->width + 3); col++) {
             put_pixel(buffer, row, col, color);
         }
     }
 
+    // Clear both the current ball position AND the screen edges
+    for (row = b->y - 3; row < (b->y + b->size + 3); row++) {
+        for (col = b->x - 3; col < (b->x + b->size + 3); col++) {
+            put_pixel(buffer, row, col, color);
+        }
+    }
+    
+    // Additionally clear the left and right edges where the ball might get stuck
+    for (row = 0; row < HEIGHT; row++) {
+        for (col = 0; col < 3; col++) {
+            put_pixel(buffer, row, col, color);  // Clear left edge
+            put_pixel(buffer, row, WIDTH-1-col, color);  // Clear right edge
+        }
+    }
+
+    // Draw the net down the middle of the screen
     for (row = 0; row < HEIGHT; row += 4) {
-        /* Draw every alternate row to create a dashed line effect */
         put_pixel(buffer, row, WIDTH / 2, net_color);
     }
 }
 
-/* this function takes a video buffer and returns to you the other one */
 volatile unsigned short* flip_buffers(volatile unsigned short* buffer) {
     /* if the back buffer is up, return that */
     if(buffer == front_buffer) {
@@ -227,44 +248,48 @@ void update_ai_paddle(struct paddle* ai_paddle) {
 }
 
 void draw_ball(volatile unsigned short* buffer, struct ball* b) {
-    for (int row = 0; row < b->size; row++) {
-        for (int col = 0; col < b->size; col++) {
-            if (row * row + col * col <= (b->size / 2) * (b->size / 2)) { // Draw a circle
-                put_pixel(buffer, b->y + row, b->x + col, b->color);
-                put_pixel(buffer, b->y + row, b->x - col, b->color);
-                put_pixel(buffer, b->y - row, b->x + col, b->color);
-                put_pixel(buffer, b->y - row, b->x - col, b->color);
-            }
-        }
-    }
+    put_pixel(buffer, b->y, b->x, b->color);
 }
 
 void update_ball(struct ball* b, struct paddle* player, struct paddle* ai_paddle) {
-    // Update position
+     // Update position
     b->x += b->dx;
     b->y += b->dy;
 
     // Check collision with top and bottom
-    if (b->y <= 0 || b->y + b->size >= HEIGHT) {
+    if (b->y <= 0 || b->y >= HEIGHT) {
         b->dy = -b->dy; // Reverse direction on collision with top/bottom
     }
-
+    // Check for scoring and reset ball
+    if (b->x <= 0) {  // AI scores
+        ai_score++;
+        b->x = WIDTH / 2;
+        b->y = HEIGHT / 2;
+    }
+    if (b->x >= WIDTH) {  // Player scores
+        player_score++;
+        b->x = WIDTH / 2;
+        b->y = HEIGHT / 2;
+    }
     // Check collision with paddles
-    // Player paddle collision
-    if (b->x <= player->x + player->width && 
-        b->y + b->size >= player->y && 
-        b->y <= player->y + player->height) {
-        b->dx = -b->dx; // Reverse direction on collision with player paddle
+     // Player paddle collision (left paddle)
+    if (b->x <= player->x + player->width &&  // Ball's right edge past paddle's left edge
+        b->x >= player->x &&                  // Ball's left edge before paddle's right edge
+        b->y >= player->y &&                  // Ball's top edge below paddle's top edge
+        b->y <= player->y + player->height) { // Ball's bottom edge above paddle's bottom edge
+        b->dx = -b->dx;                       // Reverse horizontal direction
+        
     }
 
-    // AI paddle collision
-    if (b->x + b->size >= ai_paddle->x && 
-        b->y + b->size >= ai_paddle->y && 
-        b->y <= ai_paddle->y + ai_paddle->height) {
-        b->dx = -b->dx; // Reverse direction on collision with AI paddle
+    // AI paddle collision (right paddle)
+    if (b->x + b->size >= ai_paddle->x &&    // Ball's right edge past paddle's left edge
+        b->x <= ai_paddle->x + ai_paddle->width && // Ball's left edge before paddle's right edge
+        b->y >= ai_paddle->y &&              // Ball's top edge below paddle's top edge
+        b->y <= ai_paddle->y + ai_paddle->height) { // Ball's bottom edge above paddle's bottom edge
+        b->dx = -b->dx;                      // Reverse horizontal direction
+        
     }
 }
-
 /* the main function */
 int main() {
     /* we set the mode to mode 4 with bg2 on */
@@ -276,6 +301,9 @@ int main() {
     //create the ai paddle
     struct paddle ai_paddle = {WIDTH - 15, 10, 5, 30, add_color(15, 15, 15)};
 
+    //create the ball
+    struct ball b = {WIDTH / 2, HEIGHT / 2, 5, 1, 1, add_color(15, 15, 15)};
+    
     /* add black to the palette */
     unsigned char black = add_color(0, 0, 0);
 
@@ -291,20 +319,22 @@ int main() {
 
     /* loop forever */
     while (1) {
-        /* clear the screen - only the areas around the paddle */
-        update_screen(buffer, black, (struct paddle*) &player,(struct paddle*) &ai_paddle, net_color);  // Cast to use update_screen for now
+        /* clear the previous positions of objects */
+        update_screen(buffer, black, &player, &ai_paddle, net_color, &b);
 
-        /* draw the paddle */
-        draw_paddle(buffer, &player);
+        /* handle button input for the player */
+        handle_buttons(&player);
 
-        //draw ai paddle
-        draw_paddle(buffer, &ai_paddle);
-
-        /* handle button input */
-        handle_buttons((struct paddle*) &player);  // Cast if using same button handling function
-
-        //call method to update the AI paddle
+        /* update the AI paddle's position */
         update_ai_paddle(&ai_paddle);
+
+        /* update ball position */
+        update_ball(&b, &player, &ai_paddle);
+
+        /* draw paddles and ball */
+        draw_paddle(buffer, &player);
+        draw_paddle(buffer, &ai_paddle);
+        draw_ball(buffer, &b);
 
         /* wait for vblank before switching buffers */
         wait_vblank();
