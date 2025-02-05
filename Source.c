@@ -2,7 +2,9 @@
  * square5.c
  * this program lets you move the square, with vsync
  */
-
+//include images for start and end screens
+#include "start.h"
+#include "end.h"
 /* the width and height of the screen */
 #define WIDTH 240
 #define HEIGHT 160
@@ -169,7 +171,7 @@ void update_screen(volatile unsigned short* buffer, unsigned short color, struct
         }
     }
     
-    // Additionally clear the left and right edges where the ball might get stuck
+    // Additionally clear the left and right edges where the ball might get stuck - this happened when someone would score and the ball would not clear
     for (row = 0; row < HEIGHT; row++) {
         for (col = 0; col < 3; col++) {
             put_pixel(buffer, row, col, color);  // Clear left edge
@@ -233,17 +235,23 @@ void draw_paddle(volatile unsigned short* buffer, struct paddle* p) {
     }
 }
 
-void update_ai_paddle(struct paddle* ai_paddle) {
-    static int ai_direction = 1; // 1 for moving down, -1 for moving up
+void update_ai_paddle(struct paddle* ai_paddle, struct ball* b) {
+    // Find the center of the AI paddle
+    int paddle_center = ai_paddle->y + (ai_paddle->height / 2);
+    // Find the ball's vertical position
+    int ball_y = b->y;
+    
+    // Define movement speed (dy)
+    int ai_speed = 1;
 
-    /* Move the AI paddle */
-    ai_paddle->y += ai_direction;
-
-    /* Reverse direction if it hits the top or bottom */
-    if (ai_paddle->y <= 0) {
-        ai_direction = 1; // Move down
-    } else if (ai_paddle->y + ai_paddle->height >= HEIGHT) {
-        ai_direction = -1; // Move up
+    // Move paddle towards the ball
+    if (paddle_center < ball_y && (ai_paddle->y + ai_paddle->height < HEIGHT)) {
+        // Ball is below paddle - move down
+        ai_paddle->y += ai_speed;
+    }
+    else if (paddle_center > ball_y && ai_paddle->y > 0) {
+        // Ball is above paddle - move up
+        ai_paddle->y -= ai_speed;
     }
 }
 
@@ -290,6 +298,40 @@ void update_ball(struct ball* b, struct paddle* player, struct paddle* ai_paddle
         
     }
 }
+// Add this function to draw the score:
+void draw_score(volatile unsigned short* buffer, unsigned char color) {
+    // Draw player score on left side
+    for(int i = 0; i < player_score; i++) {
+        // Draw a small vertical line for each point
+        for(int y = 5; y < 15; y++) {
+            put_pixel(buffer, y, 20 + (i * 10), color);
+        }
+    }
+
+    // Draw AI score on right side
+    for(int i = 0; i < ai_score; i++) {
+        // Draw a small vertical line for each point
+        for(int y = 5; y < 15; y++) {
+            put_pixel(buffer, y, WIDTH - 20 - (i * 10), color);
+        }
+    }
+}
+// Function to display an image from an image array
+void draw_image(volatile unsigned short* buffer, const unsigned short* data) {
+    /* Copy the data 16 bits at a time */
+    unsigned short* data_wide = (unsigned short*) data;
+
+    for (int i = 0; i < (WIDTH * HEIGHT) / 2; i++) {
+        buffer[i] = data_wide[i];
+    }
+}
+void wait_for_start() {
+    while (!button_pressed(BUTTON_START)) {
+        // Loop until the START button is pressed
+    }
+}
+
+
 /* the main function */
 int main() {
     /* we set the mode to mode 4 with bg2 on */
@@ -302,7 +344,8 @@ int main() {
     struct paddle ai_paddle = {WIDTH - 15, 10, 5, 30, add_color(15, 15, 15)};
 
     //create the ball
-    struct ball b = {WIDTH / 2, HEIGHT / 2, 5, 1, 1, add_color(15, 15, 15)};
+    struct ball b = {WIDTH / 2, HEIGHT / 2, 5, 1.5, 1.5, add_color(15, 15, 15)};
+    //ian - feel free to change the velocity of the ball - a speed of 1,1 took me like 5 minutes to score on the ai 
     
     /* add black to the palette */
     unsigned char black = add_color(0, 0, 0);
@@ -326,7 +369,7 @@ int main() {
         handle_buttons(&player);
 
         /* update the AI paddle's position */
-        update_ai_paddle(&ai_paddle);
+        update_ai_paddle(&ai_paddle, &b);
 
         /* update ball position */
         update_ball(&b, &player, &ai_paddle);
@@ -336,6 +379,8 @@ int main() {
         draw_paddle(buffer, &ai_paddle);
         draw_ball(buffer, &b);
 
+        //draw score
+        draw_score(buffer, net_color);
         /* wait for vblank before switching buffers */
         wait_vblank();
 
